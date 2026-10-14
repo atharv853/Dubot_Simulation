@@ -54,11 +54,37 @@ export const GhostPlacement: React.FC = () => {
       valid = false;
       error = 'Too close: Inside inner mechanical singularity (~155mm)';
     } else {
-      // Validate kinematics reach at object top surface
+      // 1. Validate kinematics reach at object top surface
       const ik = inverseKinematics(posX, posY, def.topSurfaceZOffset, 0);
       if (!ik) {
         valid = false;
         error = 'Kinematics: Tool cannot reach object top surface here';
+      } else {
+        // 2. Prevent overlapping with existing workspace objects (minimum 8mm clearance)
+        const currentObjects = useDobotStore.getState().objects;
+        const candHalfW = def.dimensions.width / 2;
+        const candHalfD = def.dimensions.depth / 2;
+
+        for (const other of currentObjects) {
+          if (other.attachedToTool) continue;
+          const otherDef = OBJECT_REGISTRY[other.typeId];
+          if (!otherDef) continue;
+
+          const otherHalfW = otherDef.dimensions.width / 2;
+          const otherHalfD = otherDef.dimensions.depth / 2;
+
+          const dx = Math.abs(posX - other.position[0]);
+          const dy = Math.abs(posY - other.position[1]);
+
+          const minSepX = candHalfW + otherHalfW + 8;
+          const minSepY = candHalfD + otherHalfD + 8;
+
+          if (dx < minSepX && dy < minSepY) {
+            valid = false;
+            error = `Collision: Overlaps with ${other.name}! Maintain space between objects.`;
+            break;
+          }
+        }
       }
     }
 

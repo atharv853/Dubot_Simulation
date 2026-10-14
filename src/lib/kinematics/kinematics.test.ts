@@ -38,6 +38,25 @@ describe('Dobot Magician Kinematics', () => {
     }
   });
 
+  it('verifies all 8 default teaching points are reachable with valid IK', () => {
+    const defaultPoints = [
+      { name: 'tp-1', x: 250, y: 0, z: 100, r: 0 },
+      { name: 'tp-2', x: 240, y: 100, z: 75, r: 0 },
+      { name: 'tp-3', x: 240, y: 100, z: 35, r: 0 },
+      { name: 'tp-4', x: 240, y: 100, z: 110, r: 0 },
+      { name: 'tp-5', x: 240, y: -100, z: 110, r: 0 },
+      { name: 'tp-6', x: 240, y: -100, z: 53, r: 0 },
+      { name: 'tp-7', x: 240, y: -100, z: 110, r: 0 },
+      { name: 'tp-8', x: 250, y: 0, z: 100, r: 0 },
+    ];
+
+    for (const pt of defaultPoints) {
+      const ik = inverseKinematics(pt.x, pt.y, pt.z, pt.r);
+      console.log(`Point ${pt.name} (${pt.x}, ${pt.y}, ${pt.z}):`, ik);
+      expect(ik, `Point ${pt.name} should have valid IK`).not.toBeNull();
+    }
+  });
+
   it('proves FK(IK(p)) ≈ p across a grid of reachable sample points', () => {
     // Generate valid test points by scanning joint space within safe interior bounds
     const sampleJoints: JointAngles[] = [];
@@ -101,4 +120,143 @@ describe('Dobot Magician Kinematics', () => {
     expect(areJointsWithinLimits({ j1: 0, j2: 40, j3: -15, j4: 0 })).toBe(false);
     expect(areJointsWithinLimits({ j1: 0, j2: 40, j3: 45, j4: 95 })).toBe(false);
   });
+
+  it('tests store suction latching at Point 3 coordinates', async () => {
+    const { useDobotStore } = await import('../store/useDobotStore');
+    const store = useDobotStore.getState();
+    store.resetAll();
+
+    // Check initial objects
+    console.log('Initial objects:', useDobotStore.getState().objects);
+
+    // Simulate arriving at Point 3
+    useDobotStore.setState({
+      cartesian: { x: 240, y: 100, z: 35, r: 0 }
+    });
+
+    // Turn suction on
+    useDobotStore.getState().setEndEffectorActive(true);
+
+    const objectsAfterSuction = useDobotStore.getState().objects;
+    console.log('Objects after suction ON:', objectsAfterSuction);
+
+    const attached = objectsAfterSuction.find(o => o.attachedToTool);
+    expect(attached, 'Object should be attached to tool at Point 3').toBeDefined();
+    expect(attached?.typeId).toBe('box');
+  });
+
+  it('proves getMinSafeZ prevents suction cup from entering box at top and edge boundaries', async () => {
+    const { useDobotStore, getMinSafeZ } = await import('../store/useDobotStore');
+    useDobotStore.getState().resetAll();
+
+    const objects = useDobotStore.getState().objects;
+    // Box is at (240, 100, 0), dimensions 35x35x35
+    // Top surface is at Z = 35mm
+    // Center test:
+    const atCenter = getMinSafeZ(240, 100, objects);
+    expect(atCenter.minZ).toBe(35);
+    expect(atCenter.obstacleName).toBe('Cube Block A');
+
+    // Edge boundary test: offset by 20mm in Y (box edge is at 17.5mm, suction cup radius is 16mm)
+    // 20mm <= 17.5 + 16 = 33.5mm -> Must still protect suction cup from penetrating side
+    const atEdge = getMinSafeZ(240, 120, objects);
+    expect(atEdge.minZ).toBe(35);
+    expect(atEdge.obstacleName).toBe('Cube Block A');
+
+    // Clear of box test: 50mm away in Y
+    const farAway = getMinSafeZ(240, 160, objects);
+    expect(farAway.minZ).toBe(0);
+    expect(farAway.obstacleName).toBe('Table Surface');
+  });
+
+  it('verifies confirmGhostPlacement prevents placing overlapping objects', async () => {
+    const { useDobotStore } = await import('../store/useDobotStore');
+    useDobotStore.getState().resetAll();
+
+    // Try placing a box directly on top of the existing Cube Block A at (240, 100, 0)
+    useDobotStore.getState().setGhostPlacementType('box');
+    useDobotStore.getState().setGhostState([240, 102, 0], true, null);
+
+    const confirmSuccess = useDobotStore.getState().confirmGhostPlacement();
+    expect(confirmSuccess).toBe(false);
+    expect(useDobotStore.getState().ghostValid).toBe(false);
+    expect(useDobotStore.getState().ghostError).toContain('Overlaps');
+  });
+
+  it('checks exact 3D tip position in Three.js vs robotToWorld for pick point', async () => {
+    const THREE = await import('three');
+    const { robotToWorld } = await import('./coords');
+    const { inverseKinematics, forwardKinematics } = await import('./kinematics');
+
+    const L1 = 135;
+    const L2 = 147;
+    const L3 = 60;
+    const DEG_TO_RAD = Math.PI / 180;
+
+    const ik = inverseKinematics(240, 100, 35, 0);
+    expect(ik).not.toBeNull();
+    if (!ik) return;
+
+    const root = new THREE.Group();
+    const turret = new THREE.Group();
+    turret.position.set(0, 46, 0);
+    root.add(turret);
+
+    const rearArm = new THREE.Group();
+    rearArm.position.set(0, 92, 0);
+    turret.add(rearArm);
+
+    const forearm = new THREE.Group();
+    forearm.position.set(0, L1, 0);
+    rearArm.add(forearm);
+
+    const wrist = new THREE.Group();
+    wrist.position.set(0, 0, L2);
+    forearm.add(wrist);
+
+    const stepper = new THREE.Group();
+    stepper.position.set(0, 0, L3);
+    wrist.add(stepper);
+
+    const tool = new THREE.Group();
+    tool.position.set(0, -6, 0);
+    stepper.add(tool);
+
+    const suction = new THREE.Group();
+    suction.position.set(0, -6, 0);
+    tool.add(suction);
+
+    const bellows = new THREE.Group();
+    bellows.position.set(0, -44, 0);
+    suction.add(bellows);
+
+    const tip = new THREE.Group();
+    tip.position.set(0, -14, 0);
+    bellows.add(tip);
+
+    turret.rotation.y = -ik.j1 * DEG_TO_RAD;
+    rearArm.rotation.x = ik.j2 * DEG_TO_RAD;
+    forearm.rotation.x = -ik.j2 * DEG_TO_RAD + ik.j3 * DEG_TO_RAD;
+    wrist.rotation.x = -ik.j3 * DEG_TO_RAD;
+    tool.rotation.y = -ik.j4 * DEG_TO_RAD;
+
+    root.updateMatrixWorld(true);
+
+    const worldPos = new THREE.Vector3();
+    tip.getWorldPosition(worldPos);
+
+    const expectedWorld = robotToWorld(240, 100, 35);
+    console.log('THREE.js tip position:', worldPos);
+    console.log('robotToWorld(240, 100, 35):', expectedWorld);
+    console.log('Error vector:', {
+      dx: worldPos.x - expectedWorld[0],
+      dy: worldPos.y - expectedWorld[1],
+      dz: worldPos.z - expectedWorld[2]
+    });
+
+    expect(Math.abs(worldPos.x - expectedWorld[0])).toBeLessThan(0.1);
+    expect(Math.abs(worldPos.y - expectedWorld[1])).toBeLessThan(0.1);
+    expect(Math.abs(worldPos.z - expectedWorld[2])).toBeLessThan(0.1);
+  });
 });
+

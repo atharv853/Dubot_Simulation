@@ -3,17 +3,50 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 230, 232, 235;
-  --background-start-rgb: 18, 20, 23;
-  --background-end-rgb: 18, 20, 23;
+  --dobot-bg: #121417;
+  --dobot-panel: #1b1e24;
+  --dobot-surface: #242932;
+  --dobot-border: #2e3440;
+  --dobot-accent: #1890ff;
+  --dobot-accent-hover: #40a9ff;
+  --dobot-danger: #ff4d4f;
+  --dobot-danger-hover: #ff7875;
+  --dobot-success: #52c41a;
+  --dobot-warning: #faad14;
+  --dobot-text: #e6e8eb;
+  --dobot-muted: #8c939f;
+  --dobot-input-bg: #15181e;
+  --dobot-wheel-bg: #1f252e;
+  --dobot-wheel-btn: #28303b;
+  --dobot-wheel-hover: #364252;
+}
+
+html.light {
+  --dobot-bg: #f0f2f5;
+  --dobot-panel: #ffffff;
+  --dobot-surface: #f4f6f8;
+  --dobot-border: #d9e0e8;
+  --dobot-accent: #1890ff;
+  --dobot-accent-hover: #096dd9;
+  --dobot-danger: #ff4d4f;
+  --dobot-danger-hover: #d9363e;
+  --dobot-success: #52c41a;
+  --dobot-warning: #faad14;
+  --dobot-text: #1f2937;
+  --dobot-muted: #6b7280;
+  --dobot-input-bg: #eef2f6;
+  --dobot-wheel-bg: #e2e8f0;
+  --dobot-wheel-btn: #cbd5e1;
+  --dobot-wheel-hover: #94a3b8;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: #121417;
+  color: var(--dobot-text);
+  background: var(--dobot-bg);
   overflow: hidden;
   user-select: none;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Custom Dobot scrollbar styling */
@@ -23,14 +56,14 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #181b20;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2e3440;
+  background: var(--dobot-border);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #434c5e;
+  background: var(--dobot-muted);
 }

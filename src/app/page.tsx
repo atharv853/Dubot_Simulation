@@ -8,6 +8,7 @@ import { StatusBanner } from '@/components/panels/StatusBanner';
 import { OperationPanel } from '@/components/panels/OperationPanel';
 import { ObjectsPanel } from '@/components/panels/ObjectsPanel';
 import { TeachingPanel } from '@/components/panels/TeachingPanel';
+import { BlocklyPanel } from '@/components/panels/BlocklyPanel';
 import { ComingSoonTab } from '@/components/panels/ComingSoonTab';
 
 // Dynamic import for Viewport3D to ensure WebGL/Canvas loads strictly client-side
@@ -16,7 +17,7 @@ const Viewport3D = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="w-full h-full flex flex-col items-center justify-center bg-[#101216] text-dobot-muted">
+      <div className="w-full h-full flex flex-col items-center justify-center bg-dobot-bg text-dobot-muted">
         <div className="w-10 h-10 border-2 border-dobot-accent border-t-transparent rounded-full animate-spin mb-3" />
         <span className="text-xs font-mono">Initializing Three.js 3D Viewport...</span>
       </div>
@@ -25,7 +26,7 @@ const Viewport3D = dynamic(
 );
 
 export default function SimulatorPage() {
-  const { activeTab, setActiveTab, loadFromLocalStorage } = useDobotStore();
+  const { activeTab, setActiveTab, loadFromLocalStorage, theme } = useDobotStore();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export default function SimulatorPage() {
     // Sync tab from URL query if present
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab') as TabType;
-    if (tabParam && ['operation', 'objects', 'teaching'].includes(tabParam)) {
+    if (tabParam && ['operation', 'objects', 'teaching', 'blockly'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [loadFromLocalStorage, setActiveTab]);
@@ -48,9 +49,21 @@ export default function SimulatorPage() {
     window.history.replaceState({}, '', url.toString());
   }, [activeTab, mounted]);
 
+  // Sync theme class to html element
+  useEffect(() => {
+    if (!mounted) return;
+    if (theme === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+    }
+  }, [theme, mounted]);
+
   if (!mounted) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center bg-dobot-bg text-white">
+      <div className="w-screen h-screen flex items-center justify-center bg-dobot-bg text-dobot-text">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 bg-dobot-accent rounded-full animate-ping" />
           <span className="text-xs font-mono">Loading Dobot Magician Simulator...</span>
@@ -60,59 +73,57 @@ export default function SimulatorPage() {
   }
 
   return (
-    <main className="w-screen h-screen overflow-hidden flex flex-row bg-dobot-bg text-dobot-text select-none">
-      {/* ---------------- LEFT 60%: 3D VIEWPORT ---------------- */}
-      <section className="w-[60%] h-full relative overflow-hidden border-r border-dobot-border">
-        <Viewport3D />
-      </section>
+    <main className="w-screen h-screen overflow-hidden flex flex-col bg-dobot-bg text-dobot-text select-none">
+      {/* ---------------- 100% FULL-WIDTH TOP NAVBAR ---------------- */}
+      <Navbar />
 
-      {/* ---------------- RIGHT 40%: CONTROL AREA ---------------- */}
-      <section className="w-[40%] h-full flex flex-col bg-dobot-panel overflow-hidden">
-        {/* Top Navbar */}
-        <Navbar />
+      {/* Global Warning / Feedback Banner */}
+      <StatusBanner />
 
-        {/* Global Warning / Feedback Banner */}
-        <StatusBanner />
+      {/* ---------------- MAIN CONTENT AREA (60% VIEWPORT / 40% CONTROL) ---------------- */}
+      <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
+        {/* LEFT 60%: 3D VIEWPORT */}
+        <section className="w-[60%] h-full relative overflow-hidden border-r border-dobot-border">
+          <Viewport3D />
+        </section>
 
-        {/* Routed Tab Content */}
-        <div className="flex-1 overflow-y-auto">
-          {activeTab === 'operation' && <OperationPanel />}
-          {activeTab === 'objects' && <ObjectsPanel />}
-          {activeTab === 'teaching' && <TeachingPanel />}
+        {/* RIGHT 40%: CONTROL AREA */}
+        <section className="w-[40%] h-full flex flex-col bg-dobot-panel overflow-hidden">
+          {/* Routed Tab Content */}
+          <div className="flex-1 overflow-y-auto">
+            {activeTab === 'operation' && <OperationPanel />}
+            {activeTab === 'objects' && <ObjectsPanel />}
+            {activeTab === 'teaching' && <TeachingPanel />}
+            {activeTab === 'blockly' && <BlocklyPanel />}
 
-          {/* Stubs for other DobotStudio tabs */}
-          {activeTab === 'blockly' && (
-            <ComingSoonTab
-              title="Blockly Visual Programming"
-              description="Drag-and-drop block coding module for Dobot Magician will be available in future releases."
-            />
-          )}
-          {activeTab === 'draw' && (
-            <ComingSoonTab
-              title="Write & Draw Module"
-              description="Pen holder attachment and SVG path plotting tool."
-            />
-          )}
-          {activeTab === 'laser' && (
-            <ComingSoonTab
-              title="Laser Engraving"
-              description="Greyscale raster and vector laser engraving studio."
-            />
-          )}
-          {activeTab === 'print' && (
-            <ComingSoonTab
-              title="3D Printer Extruder"
-              description="G-code slicer integration and heated bed control."
-            />
-          )}
-          {activeTab === 'leap' && (
-            <ComingSoonTab
-              title="Leap Motion Gesture Control"
-              description="Real-time hand tracking and robotic teleoperation."
-            />
-          )}
-        </div>
-      </section>
+            {/* Stubs for other DobotStudio tabs */}
+            {activeTab === 'draw' && (
+              <ComingSoonTab
+                title="Write & Draw Module"
+                description="Pen holder attachment and SVG path plotting tool."
+              />
+            )}
+            {activeTab === 'laser' && (
+              <ComingSoonTab
+                title="Laser Engraving"
+                description="Greyscale raster and vector laser engraving studio."
+              />
+            )}
+            {activeTab === 'print' && (
+              <ComingSoonTab
+                title="3D Printer Extruder"
+                description="G-code slicer integration and heated bed control."
+              />
+            )}
+            {activeTab === 'leap' && (
+              <ComingSoonTab
+                title="Leap Motion Gesture Control"
+                description="Real-time hand tracking and robotic teleoperation."
+              />
+            )}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

@@ -14,6 +14,8 @@ import {
   MapPin,
   Info,
   CheckCircle2,
+  AlertTriangle,
+  LayoutGrid,
 } from 'lucide-react';
 
 export const ObjectsPanel: React.FC = () => {
@@ -23,8 +25,11 @@ export const ObjectsPanel: React.FC = () => {
     setSelectedObjectId,
     ghostPlacementType,
     setGhostPlacementType,
+    ghostValid,
+    ghostError,
     deleteObject,
     updateObjectPosition,
+    autoArrangeObjects,
   } = useDobotStore();
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -47,7 +52,7 @@ export const ObjectsPanel: React.FC = () => {
           <span className="text-[10px] text-dobot-muted">Data-driven registry</span>
         </div>
         <p className="text-xs text-dobot-muted mb-3">
-          Click an object to enter placement mode, then move mouse over the 3D table to place it within reach.
+          Click an object to enter placement mode, then move mouse over the 3D table to place it. Automatic collision prevention stops objects from overlapping.
         </p>
 
         <div className="grid grid-cols-2 gap-2.5">
@@ -104,6 +109,28 @@ export const ObjectsPanel: React.FC = () => {
             );
           })}
         </div>
+
+        {/* Live Placement Collision Status */}
+        {ghostPlacementType && (
+          <div
+            className={`mt-3 p-2.5 rounded-lg border text-xs flex items-center gap-2 ${
+              ghostValid
+                ? 'bg-dobot-success/10 border-dobot-success/30 text-emerald-400'
+                : 'bg-dobot-danger/10 border-dobot-danger/30 text-rose-400'
+            }`}
+          >
+            {ghostValid ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+            )}
+            <span className="text-[11px]">
+              {ghostValid
+                ? 'Valid position (No overlap): Click on table to confirm placement'
+                : ghostError || 'Move cursor away from other objects to find open space'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ---------------- PLACED OBJECTS LIST ---------------- */}
@@ -115,7 +142,14 @@ export const ObjectsPanel: React.FC = () => {
               Placed Objects ({objects.length})
             </span>
           </div>
-          <span className="text-[10px] text-dobot-muted">Select to view or copy coordinates</span>
+          <button
+            onClick={() => autoArrangeObjects()}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-dobot-surface hover:bg-dobot-border border border-dobot-border text-dobot-accent hover:text-sky-300 transition-colors shadow-sm"
+            title="Automatically rearrange all objects with generous non-overlapping spacing"
+          >
+            <LayoutGrid className="w-3 h-3" />
+            <span>Auto-Arrange</span>
+          </button>
         </div>
 
         {objects.length === 0 ? (

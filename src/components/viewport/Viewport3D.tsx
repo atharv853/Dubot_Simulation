@@ -24,6 +24,7 @@ export const Viewport3D: React.FC = () => {
     ghostValid,
     ghostError,
     cancelGhostPlacement,
+    theme,
   } = useDobotStore();
 
   const controlsRef = useRef<OrbitControlsImpl>(null);
@@ -45,7 +46,11 @@ export const Viewport3D: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full h-full bg-[#101216] select-none overflow-hidden">
+    <div
+      className={`relative w-full h-full select-none overflow-hidden transition-colors ${
+        theme === 'light' ? 'bg-[#eef2f6]' : 'bg-[#101216]'
+      }`}
+    >
       {/* 3D Canvas */}
       <Canvas
         shadows

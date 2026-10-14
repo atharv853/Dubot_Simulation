@@ -14,6 +14,8 @@ export const ObjectsInScene: React.FC = () => {
       {objects.map((obj) => {
         const def = OBJECT_REGISTRY[obj.typeId];
         if (!def) return null;
+        // If object is attached to tool, it is rendered directly on the suction cup tip in DobotModel
+        if (obj.attachedToTool) return null;
 
         const isSelected = selectedObjectId === obj.id;
         // Object position in robot frame: [X, Y, Z] where Z is bottom contact point

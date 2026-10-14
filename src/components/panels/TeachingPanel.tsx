@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useDobotStore, TeachingPoint } from '@/lib/store/useDobotStore';
+import { useDobotStore, TeachingPoint, getMinSafeZ } from '@/lib/store/useDobotStore';
 import { OBJECT_REGISTRY } from '@/lib/objects/types';
 import { inverseKinematics } from '@/lib/kinematics';
 import {
@@ -22,6 +22,7 @@ import {
   Check,
   CircleDot,
   RotateCcw,
+  Target,
 } from 'lucide-react';
 
 export const TeachingPanel: React.FC = () => {
@@ -71,7 +72,7 @@ export const TeachingPanel: React.FC = () => {
     duration: number;
     startPose: { x: number; y: number; z: number; r: number };
     endPose: { x: number; y: number; z: number; r: number };
-    isPaused: boolean;
+    isPlaying: boolean;
     settleUntil: number;
   }>({
     rafId: null,
@@ -80,7 +81,7 @@ export const TeachingPanel: React.FC = () => {
     duration: 1,
     startPose: { x: 250, y: 0, z: 100, r: 0 },
     endPose: { x: 250, y: 0, z: 100, r: 0 },
-    isPaused: false,
+    isPlaying: false,
     settleUntil: 0,
   });
 
@@ -89,21 +90,24 @@ export const TeachingPanel: React.FC = () => {
       cancelAnimationFrame(playbackRef.current.rafId);
       playbackRef.current.rafId = null;
     }
+    playbackRef.current.isPlaying = false;
+    useDobotStore.setState({ isMoving: false });
     setPlaybackState('idle');
     setCurrentPlaybackIndex(-1);
   }, [setPlaybackState, setCurrentPlaybackIndex]);
 
   // Handle emergency stop during playback
   useEffect(() => {
-    if (isEmergencyStopped && playbackState === 'playing') {
+    if (isEmergencyStopped && playbackRef.current.isPlaying) {
       stopPlayback();
     }
-  }, [isEmergencyStopped, playbackState, stopPlayback]);
+  }, [isEmergencyStopped, stopPlayback]);
 
   // Main playback loop step
   const executePlaybackStep = useCallback(
     (now: number) => {
-      if (isEmergencyStopped || playbackState !== 'playing') {
+      const state = useDobotStore.getState();
+      if (state.isEmergencyStopped || !playbackRef.current.isPlaying) {
         stopPlayback();
         return;
       }
@@ -114,8 +118,9 @@ export const TeachingPanel: React.FC = () => {
         return;
       }
 
+      const pts = state.teachingPoints;
       const { startTime, duration, startPose, endPose, targetIndex } = playbackRef.current;
-      const elapsed = (now - startTime) / 1000;
+      const elapsed = Math.max(0, (now - startTime) / 1000);
       let t = Math.min(1, Math.max(0, elapsed / duration));
 
       // Smooth cosine ease-in-out
@@ -123,33 +128,67 @@ export const TeachingPanel: React.FC = () => {
 
       const interpX = startPose.x + (endPose.x - startPose.x) * easeT;
       const interpY = startPose.y + (endPose.y - startPose.y) * easeT;
-      const interpZ = startPose.z + (endPose.z - startPose.z) * easeT;
+      const rawInterpZ = startPose.z + (endPose.z - startPose.z) * easeT;
       const interpR = startPose.r + (endPose.r - startPose.r) * easeT;
+
+      const { minZ } = getMinSafeZ(interpX, interpY, state.objects);
+      const interpZ = Math.max(minZ, rawInterpZ);
 
       const ik = inverseKinematics(interpX, interpY, interpZ, interpR);
       if (ik) {
-        setJointsDirect(ik);
+        // Continuous check for suction latching during motion
+        const currentObjects = state.objects;
+        const isSuctionOn = state.endEffectorActive && state.endEffectorType === 'suction';
+        const hasAttached = currentObjects.some((o) => o.attachedToTool);
+
+        let nextObjects = currentObjects;
+        if (isSuctionOn && !hasAttached) {
+          const workpiece = currentObjects.find((o) => !o.attachedToTool && o.typeId === 'box');
+          if (workpiece) {
+            const def = OBJECT_REGISTRY[workpiece.typeId];
+            const topZ = workpiece.position[2] + (def ? def.dimensions.height : 35);
+            const distH = Math.hypot(interpX - workpiece.position[0], interpY - workpiece.position[1]);
+            const distV = Math.abs(interpZ - topZ);
+            if (distH <= 45 && distV <= 25) {
+              nextObjects = currentObjects.map((o) =>
+                o.id === workpiece.id
+                  ? { ...o, attachedToTool: true, attachedRelativeOffset: [0, 0, 0] }
+                  : o
+              );
+            }
+          }
+        }
+
+        useDobotStore.setState({
+          joints: ik,
+          cartesian: { x: interpX, y: interpY, z: interpZ, r: interpR },
+          objects: nextObjects,
+          isMoving: true,
+        });
+
+        state.addTrajectoryPoint([interpX, interpY, interpZ]);
       }
 
       if (t >= 1) {
         // Point target reached: execute point's suction action
-        const currentPt = teachingPoints[targetIndex];
+        const currentPt = pts[targetIndex];
         if (currentPt) {
           if (currentPt.suction === 'on') {
-            setEndEffectorActive(true);
-            playbackRef.current.settleUntil = now + 350; // pause 350ms to ensure grip
+            useDobotStore.getState().setEndEffectorType('suction');
+            useDobotStore.getState().setEndEffectorActive(true);
+            playbackRef.current.settleUntil = now + 400; // pause 400ms to ensure grip
           } else if (currentPt.suction === 'off') {
-            setEndEffectorActive(false);
-            playbackRef.current.settleUntil = now + 300; // pause 300ms to ensure drop
+            useDobotStore.getState().setEndEffectorActive(false);
+            playbackRef.current.settleUntil = now + 350; // pause 350ms to ensure drop
           }
         }
 
         const nextIndex = targetIndex + 1;
-        if (nextIndex < teachingPoints.length) {
+        if (nextIndex < pts.length) {
           // Advance to next point
-          const nextPt = teachingPoints[nextIndex];
+          const nextPt = pts[nextIndex];
           playbackRef.current.targetIndex = nextIndex;
-          playbackRef.current.startTime = now + (playbackRef.current.settleUntil > now ? 300 : 0);
+          playbackRef.current.startTime = Math.max(now, playbackRef.current.settleUntil);
           playbackRef.current.startPose = { ...endPose };
           playbackRef.current.endPose = { x: nextPt.x, y: nextPt.y, z: nextPt.z, r: nextPt.r };
 
@@ -159,8 +198,9 @@ export const TeachingPanel: React.FC = () => {
             nextPt.y - endPose.y,
             nextPt.z - endPose.z
           );
-          const speedFactor = speed / 50;
-          playbackRef.current.duration = Math.max(0.6, dist / (110 * speedFactor));
+          const currentSpeed = useDobotStore.getState().speed;
+          const speedFactor = currentSpeed / 50;
+          playbackRef.current.duration = Math.max(0.65, dist / (105 * speedFactor));
 
           setCurrentPlaybackIndex(nextIndex);
           playbackRef.current.rafId = requestAnimationFrame(executePlaybackStep);
@@ -174,40 +214,70 @@ export const TeachingPanel: React.FC = () => {
 
       playbackRef.current.rafId = requestAnimationFrame(executePlaybackStep);
     },
-    [
-      isEmergencyStopped,
-      playbackState,
-      teachingPoints,
-      speed,
-      setJointsDirect,
-      setEndEffectorActive,
-      setCurrentPlaybackIndex,
-      stopPlayback,
-    ]
+    [setCurrentPlaybackIndex, stopPlayback]
   );
 
   const startPlayback = () => {
-    if (teachingPoints.length === 0 || isEmergencyStopped) return;
+    const state = useDobotStore.getState();
+    const pts = state.teachingPoints;
+    if (pts.length === 0 || state.isEmergencyStopped) return;
 
-    const startIndex = currentPlaybackIndex >= 0 ? currentPlaybackIndex : 0;
-    const targetPt = teachingPoints[startIndex];
+    // 1. Determine starting point (restart from 0 unless resuming from mid-pause)
+    let startIndex = 0;
+    if (
+      playbackState === 'paused' &&
+      currentPlaybackIndex >= 0 &&
+      currentPlaybackIndex < pts.length - 1
+    ) {
+      startIndex = currentPlaybackIndex;
+    }
 
+    // 2. If starting fresh from 0, check if we need to auto-adapt pick points to current workpiece location
+    let effectivePts = pts;
+    if (startIndex === 0) {
+      const workpiece = state.objects.find((o) => o.typeId === 'box');
+      if (workpiece && !workpiece.attachedToTool) {
+        const pt3 = pts[2];
+        if (pt3 && pt3.suction === 'on' && (pt3.name.includes('Pick') || pt3.name.includes('Box'))) {
+          const def = OBJECT_REGISTRY[workpiece.typeId];
+          const topZ = workpiece.position[2] + (def ? def.dimensions.height : 35);
+          const bx = Number(workpiece.position[0].toFixed(1));
+          const by = Number(workpiece.position[1].toFixed(1));
+
+          if (Math.hypot(pt3.x - bx, pt3.y - by) > 5) {
+            effectivePts = pts.map((p, idx) => {
+              if (idx === 1) return { ...p, x: bx, y: by, z: Number((topZ + 40).toFixed(1)) };
+              if (idx === 2) return { ...p, x: bx, y: by, z: Number(topZ.toFixed(1)), suction: 'on' as const };
+              if (idx === 3) return { ...p, x: bx, y: by, z: Number((topZ + 75).toFixed(1)) };
+              return p;
+            });
+            useDobotStore.setState({ teachingPoints: effectivePts });
+          }
+        }
+      }
+    }
+
+    const targetPt = effectivePts[startIndex];
+    const currentCartesian = state.cartesian;
+
+    playbackRef.current.isPlaying = true;
     playbackRef.current.targetIndex = startIndex;
     playbackRef.current.startTime = performance.now();
-    playbackRef.current.startPose = { ...cartesian };
+    playbackRef.current.startPose = { ...currentCartesian };
     playbackRef.current.endPose = { x: targetPt.x, y: targetPt.y, z: targetPt.z, r: targetPt.r };
 
     const dist = Math.hypot(
-      targetPt.x - cartesian.x,
-      targetPt.y - cartesian.y,
-      targetPt.z - cartesian.z
+      targetPt.x - currentCartesian.x,
+      targetPt.y - currentCartesian.y,
+      targetPt.z - currentCartesian.z
     );
-    const speedFactor = speed / 50;
-    playbackRef.current.duration = Math.max(0.6, dist / (110 * speedFactor));
+    const speedFactor = state.speed / 50;
+    playbackRef.current.duration = Math.max(0.65, dist / (110 * speedFactor));
     playbackRef.current.settleUntil = 0;
 
     setCurrentPlaybackIndex(startIndex);
     setPlaybackState('playing');
+    useDobotStore.setState({ isMoving: true });
     playbackRef.current.rafId = requestAnimationFrame(executePlaybackStep);
   };
 
@@ -216,7 +286,43 @@ export const TeachingPanel: React.FC = () => {
       cancelAnimationFrame(playbackRef.current.rafId);
       playbackRef.current.rafId = null;
     }
+    playbackRef.current.isPlaying = false;
+    useDobotStore.setState({ isMoving: false });
     setPlaybackState('paused');
+  };
+
+  // Dynamically sync / adapt points 2..7 to current object positions on the table
+  const handleAdaptToObjects = () => {
+    const currentObjects = useDobotStore.getState().objects;
+    const workpiece = currentObjects.find((o) => o.typeId === 'box') || currentObjects[1];
+    const station = currentObjects.find((o) => o.typeId === 'scale') || currentObjects[0];
+
+    if (!workpiece) return;
+
+    const boxDef = OBJECT_REGISTRY[workpiece.typeId];
+    const boxTopZ = workpiece.position[2] + (boxDef ? boxDef.dimensions.height : 35);
+    const bx = Number(workpiece.position[0].toFixed(1));
+    const by = Number(workpiece.position[1].toFixed(1));
+
+    const stationDef = station ? OBJECT_REGISTRY[station.typeId] : null;
+    const stationTopZ = station ? station.position[2] + (stationDef ? stationDef.dimensions.height : 18) : 0;
+    const sx = station ? Number(station.position[0].toFixed(1)) : 240;
+    const sy = station ? Number(station.position[1].toFixed(1)) : -100;
+
+    const adaptedPoints: TeachingPoint[] = [
+      { id: 'tp-1', name: 'Home Standby', x: 250, y: 0, z: 100, r: 0, suction: 'off' },
+      { id: 'tp-2', name: `Above ${workpiece.name}`, x: bx, y: by, z: Number((boxTopZ + 40).toFixed(1)), r: 0, suction: 'off' },
+      { id: 'tp-3', name: `Pick ${workpiece.name}`, x: bx, y: by, z: Number(boxTopZ.toFixed(1)), r: 0, suction: 'on' },
+      { id: 'tp-4', name: `Lift Up with ${workpiece.name}`, x: bx, y: by, z: Number((boxTopZ + 75).toFixed(1)), r: 0, suction: 'none' },
+      { id: 'tp-5', name: `Above ${station ? station.name : 'Target'}`, x: sx, y: sy, z: Number((stationTopZ + 80).toFixed(1)), r: 0, suction: 'none' },
+      { id: 'tp-6', name: `Place on ${station ? station.name : 'Target'}`, x: sx, y: sy, z: Number((stationTopZ + (boxDef ? boxDef.dimensions.height : 35)).toFixed(1)), r: 0, suction: 'off' },
+      { id: 'tp-7', name: 'Retract Up', x: sx, y: sy, z: Number((stationTopZ + 80).toFixed(1)), r: 0, suction: 'none' },
+      { id: 'tp-8', name: 'Return Home', x: 250, y: 0, z: 100, r: 0, suction: 'none' },
+    ];
+
+    useDobotStore.setState({ teachingPoints: adaptedPoints });
+    setStorageNotice('Points adapted to current 3D object positions');
+    setTimeout(() => setStorageNotice(null), 3000);
   };
 
   // Add current position as point
@@ -368,6 +474,18 @@ export const TeachingPanel: React.FC = () => {
             <Square className="w-3.5 h-3.5 fill-current" />
             <span>STOP</span>
           </button>
+
+          <button
+            onClick={() => {
+              stopPlayback();
+              setCurrentPlaybackIndex(0);
+            }}
+            className="py-2 px-2.5 rounded-md bg-dobot-surface hover:bg-dobot-border border border-dobot-border text-dobot-muted hover:text-white font-bold text-xs flex items-center justify-center gap-1 transition-all"
+            title="Reset sequence to Point 1"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">RESET</span>
+          </button>
         </div>
       </div>
 
@@ -379,6 +497,15 @@ export const TeachingPanel: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleAdaptToObjects}
+              className="flex items-center gap-1 px-2.5 py-1 rounded text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-medium shadow-sm transition-all"
+              title="Auto-align pick & place trajectory points to current 3D positions of workpiece & station"
+            >
+              <Target className="w-3 h-3" />
+              <span>Adapt to Objects</span>
+            </button>
+
             <button
               onClick={handleAddCurrentPosition}
               className="flex items-center gap-1 px-2.5 py-1 rounded text-xs bg-dobot-accent hover:bg-dobot-accentHover text-white font-medium shadow-sm transition-all"
@@ -455,6 +582,31 @@ export const TeachingPanel: React.FC = () => {
                       </td>
                       <td className="py-2 px-2 text-right font-sans">
                         <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={async () => {
+                              const store = useDobotStore.getState();
+                              setCurrentPlaybackIndex(idx);
+                              await store.moveToCartesianTarget(
+                                {
+                                  x: pt.x,
+                                  y: pt.y,
+                                  z: pt.z,
+                                  r: pt.r,
+                                },
+                                0.9
+                              );
+                              if (pt.suction === 'on') {
+                                store.setEndEffectorType('suction');
+                                store.setEndEffectorActive(true);
+                              } else if (pt.suction === 'off') {
+                                store.setEndEffectorActive(false);
+                              }
+                            }}
+                            className="p-1 rounded text-sky-400 hover:text-white hover:bg-sky-500/20 transition-colors"
+                            title={`Move Robot to Point ${idx + 1}`}
+                          >
+                            <Play className="w-3 h-3 fill-current" />
+                          </button>
                           <button
                             onClick={() => reorderTeachingPoints(idx, Math.max(0, idx - 1))}
                             disabled={idx === 0}

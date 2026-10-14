@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: 'class',
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -9,18 +10,22 @@ module.exports = {
     extend: {
       colors: {
         dobot: {
-          bg: "#121417",
-          panel: "#1b1e24",
-          surface: "#242932",
-          border: "#2e3440",
-          accent: "#1890ff",
-          accentHover: "#40a9ff",
-          danger: "#ff4d4f",
-          dangerHover: "#ff7875",
-          success: "#52c41a",
-          warning: "#faad14",
-          text: "#e6e8eb",
-          muted: "#8c939f",
+          bg: "var(--dobot-bg)",
+          panel: "var(--dobot-panel)",
+          surface: "var(--dobot-surface)",
+          border: "var(--dobot-border)",
+          accent: "var(--dobot-accent)",
+          accentHover: "var(--dobot-accent-hover)",
+          danger: "var(--dobot-danger)",
+          dangerHover: "var(--dobot-danger-hover)",
+          success: "var(--dobot-success)",
+          warning: "var(--dobot-warning)",
+          text: "var(--dobot-text)",
+          muted: "var(--dobot-muted)",
+          inputBg: "var(--dobot-input-bg)",
+          wheelBg: "var(--dobot-wheel-bg)",
+          wheelBtn: "var(--dobot-wheel-btn)",
+          wheelHover: "var(--dobot-wheel-hover)",
         },
       },
     },
