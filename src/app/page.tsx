@@ -10,6 +10,8 @@ import { ObjectsPanel } from '@/components/panels/ObjectsPanel';
 import { TeachingPanel } from '@/components/panels/TeachingPanel';
 import { BlocklyPanel } from '@/components/panels/BlocklyPanel';
 import { ComingSoonTab } from '@/components/panels/ComingSoonTab';
+import { useHostSync } from '@/lib/realtime/useHostSync';
+import { Smartphone, Radio, CheckCircle2 } from 'lucide-react';
 
 // Dynamic import for Viewport3D to ensure WebGL/Canvas loads strictly client-side
 const Viewport3D = dynamic(
@@ -28,6 +30,9 @@ const Viewport3D = dynamic(
 export default function SimulatorPage() {
   const { activeTab, setActiveTab, loadFromLocalStorage, theme } = useDobotStore();
   const [mounted, setMounted] = useState(false);
+
+  // Authoritative Host Synchronization Agent
+  const syncStatus = useHostSync('atharv');
 
   useEffect(() => {
     setMounted(true);
@@ -75,7 +80,7 @@ export default function SimulatorPage() {
   return (
     <main className="w-screen h-screen overflow-hidden flex flex-col bg-dobot-bg text-dobot-text select-none">
       {/* ---------------- 100% FULL-WIDTH TOP NAVBAR ---------------- */}
-      <Navbar />
+      <Navbar syncStatus={syncStatus} />
 
       {/* Global Warning / Feedback Banner */}
       <StatusBanner />
@@ -85,6 +90,32 @@ export default function SimulatorPage() {
         {/* LEFT 60%: 3D VIEWPORT */}
         <section className="w-[60%] h-full relative overflow-hidden border-r border-dobot-border">
           <Viewport3D />
+
+          {/* Floating HUD: Live Remote Teleoperation Activity */}
+          {syncStatus.lastRemoteCommand && (
+            <div className="absolute top-4 left-4 z-20 flex items-center gap-2.5 px-3 py-2 rounded-xl bg-dobot-panel/90 backdrop-blur-md border border-dobot-accent shadow-xl text-xs font-mono">
+              <Smartphone className="w-4 h-4 text-emerald-400 animate-pulse shrink-0" />
+              <div className="flex flex-col">
+                <span className="text-[10px] text-dobot-muted font-bold uppercase tracking-wider">
+                  Remote Teleoperation ({syncStatus.lastRemoteCommand.sender})
+                </span>
+                <span className="font-bold text-white flex items-center gap-1.5">
+                  <span className="text-dobot-accent">{syncStatus.lastRemoteCommand.type}</span>
+                  <span
+                    className={`text-[10px] px-1 py-0.2 rounded font-bold uppercase ${
+                      syncStatus.lastRemoteCommand.status === 'completed'
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : syncStatus.lastRemoteCommand.status === 'failed'
+                        ? 'bg-red-500/20 text-red-400'
+                        : 'bg-amber-500/20 text-amber-400 animate-pulse'
+                    }`}
+                  >
+                    {syncStatus.lastRemoteCommand.status}
+                  </span>
+                </span>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* RIGHT 40%: CONTROL AREA */}
