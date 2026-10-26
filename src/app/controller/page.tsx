@@ -35,6 +35,8 @@ export default function MobileControllerPage() {
   const {
     isConnected,
     hostOnline,
+    isSimulationMode,
+    setSimulationMode,
     robotState,
     lastCommand,
     activeCycleStep,
@@ -255,14 +257,20 @@ export default function MobileControllerPage() {
             {/* Host Online Status */}
             <div
               className={`flex items-center gap-2 p-2 rounded-lg border transition-all ${
-                hostOnline
+                isSimulationMode
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  : hostOnline
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                   : 'bg-red-500/10 border-red-500/30 text-red-400'
               }`}
             >
               <div
                 className={`w-2.5 h-2.5 rounded-full ${
-                  hostOnline ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'
+                  isSimulationMode
+                    ? 'bg-amber-400 animate-pulse'
+                    : hostOnline
+                    ? 'bg-emerald-400 animate-pulse'
+                    : 'bg-red-400'
                 }`}
               />
               <div className="flex flex-col min-w-0">
@@ -270,7 +278,11 @@ export default function MobileControllerPage() {
                   Host Simulator
                 </span>
                 <span className="font-extrabold text-xs truncate">
-                  {hostOnline ? 'ONLINE (Laptop)' : 'OFFLINE'}
+                  {isSimulationMode
+                    ? 'TEST MODE (Virtual)'
+                    : hostOnline
+                    ? 'ONLINE (Laptop)'
+                    : 'OFFLINE'}
                 </span>
               </div>
             </div>
@@ -300,10 +312,43 @@ export default function MobileControllerPage() {
           </div>
 
           {/* Warning banner when host is offline */}
-          {!hostOnline && (
-            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-semibold animate-pulse">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
-              <span>Host laptop is currently offline. Open simulator on laptop as atharv.</span>
+          {!hostOnline && !isSimulationMode && (
+            <div className="flex flex-col gap-2 p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs shadow-lg">
+              <div className="flex items-center gap-2 font-semibold">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>Host laptop is currently offline.</span>
+              </div>
+              <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                To test live teleoperation, open the 3D simulator on your laptop as <strong className="text-white">atharv</strong>.
+                Or, enable <strong className="text-white">Test Mode</strong> right now to simulate kinematics directly on this screen!
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setSimulationMode(true)}
+                  className="flex-1 py-1.5 px-3 rounded-lg bg-amber-500 text-black font-extrabold text-xs hover:bg-amber-400 active:scale-95 transition-all flex items-center justify-center gap-1.5 shadow"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Enable Test Simulation Mode
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Active Test Mode Banner */}
+          {isSimulationMode && (
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs shadow">
+              <div className="flex items-center gap-2 font-medium">
+                <Sparkles className="w-4 h-4 shrink-0 text-emerald-400 animate-pulse" />
+                <span>Test Mode Active (Full kinematics simulated on device)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSimulationMode(false)}
+                className="py-1 px-2.5 rounded-lg bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-900 font-mono text-[10px] font-bold"
+              >
+                Exit Test Mode
+              </button>
             </div>
           )}
 

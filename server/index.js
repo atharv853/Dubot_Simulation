@@ -1,7 +1,15 @@
-/**
- * Persistent Real-Time Synchronization Backend for DOBOT Magician Simulator
- * Coordinates authoritative state between ATHARV (Host) and TEST (Remote Controller).
- */
+// Automatically load environment variables if .env.local exists (Node 20+)
+try {
+  if (typeof process.loadEnvFile === 'function') {
+    process.loadEnvFile('.env.local');
+  }
+} catch (e) {
+  try {
+    if (typeof process.loadEnvFile === 'function') {
+      process.loadEnvFile('.env');
+    }
+  } catch (e2) {}
+}
 
 const http = require('http');
 const { Server } = require('socket.io');
@@ -47,10 +55,31 @@ function cleanCommandCache() {
 }
 setInterval(cleanCommandCache, 10000);
 
-// Basic HTTP server with health & status endpoint
+// Optional Next.js integration for unified single-port deployment on Render
+let nextHandler = null;
+if (process.env.SERVE_NEXT !== 'false') {
+  try {
+    const next = require('next');
+    const dev = process.env.NODE_ENV !== 'production';
+    const nextApp = next({ dev });
+    nextApp
+      .prepare()
+      .then(() => {
+        nextHandler = nextApp.getRequestHandler();
+        console.log(`[REALTIME + NEXT] Next.js attached to Realtime server on port ${PORT}`);
+      })
+      .catch((err) => {
+        console.log('[REALTIME] Running standalone without Next.js:', err.message);
+      });
+  } catch (err) {
+    console.log('[REALTIME] Next.js module not available, running standalone');
+  }
+}
+
+// Basic HTTP server with health, status, and Next.js delegator
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
@@ -59,7 +88,30 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.url === '/' || req.url === '/health') {
+  if (req.url === '/health' || req.url === '/realtime-health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        status: 'online',
+        service: 'dobot-magician-realtime-relay',
+        sessionState,
+        timestamp: Date.now(),
+      })
+    );
+    return;
+  }
+
+  // Socket.IO handles /socket.io requests via its own internal listeners
+  if (req.url && req.url.startsWith('/socket.io')) {
+    return;
+  }
+
+  // Delegate all page requests to Next.js if initialized
+  if (nextHandler) {
+    return nextHandler(req, res);
+  }
+
+  if (req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
@@ -90,10 +142,16 @@ const io = new Server(server, {
 // Socket Authentication Middleware
 io.use((socket, next) => {
   try {
-    const token =
+    let token =
       socket.handshake.auth?.token ||
       socket.handshake.headers?.authorization?.replace('Bearer ', '') ||
       socket.handshake.query?.token;
+
+    // Parse HTTP-only cookie if token not in auth payload
+    if (!token && socket.handshake.headers?.cookie) {
+      const match = socket.handshake.headers.cookie.match(/dobot_session=([^;]+)/);
+      if (match) token = match[1];
+    }
 
     if (!token) {
       // In development fallback, allow handshake if username/role passed explicitly

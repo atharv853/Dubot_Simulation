@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { fork, ChildProcess } from 'child_process';
 import { io as ClientSocket, Socket as ClientSocketType } from 'socket.io-client';
 import { signToken } from '../auth/jwt';
 import { RobotCommand, DEFAULT_SESSION_ID } from './types';
@@ -6,6 +7,7 @@ import { forwardKinematics, inverseKinematics, HOME_JOINTS } from '../kinematics
 
 describe('E2E Real-Time Multi-Device Remote Control against Live Server', () => {
   const SERVER_URL = 'http://localhost:3002';
+  let serverProcess: ChildProcess | null = null;
   let hostSocket: ClientSocketType;
   let controllerSocket: ClientSocketType;
 
@@ -15,11 +17,23 @@ describe('E2E Real-Time Multi-Device Remote Control against Live Server', () => 
   beforeAll(async () => {
     hostToken = signToken({ username: 'atharv', role: 'host', sessionId: DEFAULT_SESSION_ID });
     controllerToken = signToken({ username: 'test', role: 'controller', sessionId: DEFAULT_SESSION_ID });
+
+    // Start background live server if not already running
+    serverProcess = fork('server/index.js', [], {
+      env: { ...process.env, PORT: '3002', AUTH_SECRET: 'dobot-magician-secret-key-2024-secure-jwt' },
+      stdio: 'ignore',
+    });
+
+    await new Promise((r) => setTimeout(r, 600));
   });
 
   afterAll(() => {
     if (hostSocket?.connected) hostSocket.disconnect();
     if (controllerSocket?.connected) controllerSocket.disconnect();
+    if (serverProcess) {
+      serverProcess.kill('SIGTERM');
+      serverProcess = null;
+    }
   });
 
   it('connects Atharv (Host) and Test (Controller) to the live server on port 3002', async () => {

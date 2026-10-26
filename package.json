@@ -7,7 +7,7 @@
     "server": "node server/index.js",
     "dev:all": "concurrently -n \"NEXT,REALTIME\" -c \"cyan,magenta\" \"next dev\" \"node server/index.js\"",
     "build": "next build",
-    "start": "next start",
+    "start": "node server/index.js",
     "lint": "next lint",
     "test": "vitest run"
   },

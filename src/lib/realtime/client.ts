@@ -10,12 +10,16 @@ export function getRealtimeServerUrl(): string {
 
   // 2. Client-side dynamic detection
   if (typeof window !== 'undefined') {
-    const { hostname, protocol } = window.location;
-    // Local development or LAN testing
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.')) {
+    const { hostname, protocol, port } = window.location;
+    // If running on local dev port (e.g. 3000), default relay is on 3002
+    if (port === '3000' || hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.')) {
       return `${protocol}//${hostname}:3002`;
     }
-    // In production on custom domain or Vercel, if reverse proxy or same domain configured
+    // If deployed on Vercel (serverless), route WebSockets to persistent Render backend
+    if (hostname.includes('vercel.app')) {
+      return 'https://dubot-simulation.onrender.com';
+    }
+    // In production on Render or custom domain
     return `${protocol}//${hostname}`;
   }
 
@@ -23,13 +27,16 @@ export function getRealtimeServerUrl(): string {
 }
 
 export function getSocket(token?: string | null, userRole?: string, username?: string): Socket {
-  if (socketInstance && socketInstance.connected) {
-    return socketInstance;
-  }
-
+  // Reuse existing socket instance without tearing it down during connection handshake
   if (socketInstance) {
-    socketInstance.disconnect();
-    socketInstance = null;
+    if (token && socketInstance.auth) (socketInstance.auth as any).token = token;
+    if (userRole && socketInstance.auth) (socketInstance.auth as any).role = userRole;
+    if (username && socketInstance.auth) (socketInstance.auth as any).username = username;
+
+    if (!socketInstance.connected && socketInstance.disconnected) {
+      socketInstance.connect();
+    }
+    return socketInstance;
   }
 
   const serverUrl = getRealtimeServerUrl();
@@ -47,12 +54,13 @@ export function getSocket(token?: string | null, userRole?: string, username?: s
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
-    timeout: 10000,
+    timeout: 6000,
     autoConnect: true,
   });
 
   socketInstance.on('connect_error', (err) => {
-    console.warn('[REALTIME CLIENT] Connection error:', err.message);
+    // Expected on Vercel when an external persistent WebSocket backend is not configured yet
+    console.debug('[REALTIME CLIENT] Socket.IO connection note:', err.message);
   });
 
   return socketInstance;
